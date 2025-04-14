@@ -1,0 +1,50 @@
+{
+    "id": null,
+    "uid": "general-dashboard",
+    "title": "General Dashboard",
+    "tags": ["index", "overview"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 0,
+    "refresh": "5s", 
+    "panels": [
+        {
+            "type": "stat",
+            "title": "Número de Autores",
+            "targets": [
+                {
+                    "rawSql": "SELECT COUNT(*) AS total_authors FROM authors",
+                    "format": "table"
+                }
+            ],
+            "gridPos": {
+                "x": 0,
+                "y": 0,
+                "w": 12,
+                "h": 6
+            },
+            "options": {
+                "reduceOptions": {
+                    "calcs": ["lastNotNull"],
+                    "fields": "",
+                    "values": false
+                },
+                "orientation": "horizontal"
+            }
+        },
+        {
+            "type": "text",
+            "title": "Navegación",
+            "gridPos": {
+                "x": 0,
+                "y": 6,
+                "w": 24,
+                "h": 4
+            },
+            "options": {
+                "content": "[[Authors Dashboard]](/d/authors-dashboard/authors-dashboard) | [[Books Dashboard]](/d/books-dashboard/books-dashboard) | [[Reviews Dashboard]](/d/reviews-dashboard/reviews-dashboard)",
+                "mode": "markdown"
+            }
+        }
+    ]
+}

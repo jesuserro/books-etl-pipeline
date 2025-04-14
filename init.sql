@@ -1,0 +1,7 @@
+CREATE DATABASE IF NOT EXISTS airflow_db;
+CREATE DATABASE IF NOT EXISTS goodreads;
+
+CREATE USER IF NOT EXISTS 'airflow'@'%' IDENTIFIED BY 'airflow123';
+GRANT ALL PRIVILEGES ON airflow_db.* TO 'airflow'@'%';
+GRANT ALL PRIVILEGES ON goodreads.* TO 'airflow'@'%';
+FLUSH PRIVILEGES;

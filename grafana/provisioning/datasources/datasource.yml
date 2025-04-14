@@ -1,0 +1,11 @@
+apiVersion: 1
+datasources:
+  - name: MySQL
+    type: mysql
+    access: proxy
+    url: mysql:3306
+    database: ${GOODREADS_DB_NAME}
+    user: ${GOODREADS_DB_USER}
+    secureJsonData:
+      password: ${GOODREADS_DB_PASSWORD}
+    isDefault: true

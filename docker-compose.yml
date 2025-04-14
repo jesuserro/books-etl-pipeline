@@ -1,0 +1,170 @@
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.8.1-python3.10
+  env_file:
+    - .env
+  environment:
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+pymysql://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@mysql:3306/${AIRFLOW_DB_NAME}
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: mysql+pymysql://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@mysql:3306/${AIRFLOW_DB_NAME}
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'False'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'False'
+    AIRFLOW__WEBSERVER__DEFAULT_USER: ${AIRFLOW_USERNAME}
+    AIRFLOW__WEBSERVER__DEFAULT_PASSWORD: ${AIRFLOW_PASSWORD}
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: ${TIMEZONE}
+    AIRFLOW__CORE__FERNET_KEY: ''
+    PYTHONPATH: /opt/airflow/dags:/app/src:/app/tests:/app/data:/app/db
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./airflow/logs:/opt/airflow/logs 
+    - ./src:/app/src
+    - ./data:/app/data
+    - ./tests:/app/tests
+    - ./db:/app/db
+  depends_on:
+    - mysql
+  user: "${AIRFLOW_UID}:0"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: always
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+  airflow-init:
+    build: .
+    image: goodreads_airflow:init
+    <<: *airflow-common
+    container_name: airflow-init
+    depends_on:
+      mysql:
+        condition: service_healthy
+      fix-permissions:
+        condition: service_completed_successfully
+    entrypoint: ["/entrypoint.sh"]
+    command: ["airflow", "db", "check"]
+
+  airflow-webserver:
+    build: .
+    image: goodreads_airflow:webserver
+    <<: *airflow-common
+    container_name: airflow-webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      fix-permissions:
+        condition: service_completed_successfully
+    entrypoint: ["/entrypoint.sh"]
+    command: ["airflow", "webserver"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  airflow-scheduler:
+    build: .
+    image: goodreads_airflow:scheduler
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    depends_on:
+      mysql:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    entrypoint: ["/entrypoint.sh"]
+    command: ["airflow", "scheduler"]
+
+  airflow-conn-goodreads:
+    build: .
+    image: goodreads_airflow:init
+    <<: *airflow-common
+    container_name: airflow-conn-goodreads
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+    entrypoint: ["/entrypoint.sh"]
+    command: >
+      bash -c "airflow connections add 'goodreads_localhost' --conn-uri='mysql+pymysql://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@mysql:3306/${GOODREADS_DB_NAME}' && echo 'Conexión goodreads_localhost añadida'"
+
+  etl-python:
+    build:
+      context: .
+      dockerfile: Dockerfile.etl
+    container_name: etl-python
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./tests:/app/tests
+      - ./db:/app/db
+    working_dir: /app/src
+    environment:
+      - PYTHONPATH=/app/src:/app/tests:/app/data:/app/db
+      - GOODREADS_DB_NAME=${GOODREADS_DB_NAME}
+      - AIRFLOW_DB_USER=${AIRFLOW_DB_USER}
+      - AIRFLOW_DB_PASSWORD=${AIRFLOW_DB_PASSWORD}
+    depends_on:
+      - mysql
+    command: tail -f /dev/null
+
+  fix-permissions:
+    image: busybox
+    volumes:
+      - ./airflow/logs:/opt/airflow/logs
+    command: ["sh", "-c", "chown -R 50000:0 /opt/airflow/logs"]
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    user: root
+    ports:
+      - "3000:3000"
+    entrypoint: ["/bin/bash", "/etc/grafana/entrypoint.sh"]
+    environment:
+      - GF_SECURITY_ADMIN_USER_FILE=/run/secrets/grafana_admin_user
+      - GF_SECURITY_ADMIN_PASSWORD_FILE=/run/secrets/grafana_admin_password
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/entrypoint.sh:/etc/grafana/entrypoint.sh:ro
+    secrets:
+      - grafana_admin_user
+      - grafana_admin_password
+      - goodreads_db_user
+      - goodreads_db_password
+      - goodreads_db_name
+
+volumes:
+  mysql_data:
+  grafana_data:
+
+secrets:
+  grafana_admin_user:
+    file: ${HOME}/.secrets/goodreads/grafana_admin_user
+  grafana_admin_password:
+    file: ${HOME}/.secrets/goodreads/grafana_admin_password
+  goodreads_db_user:
+    file: ${HOME}/.secrets/goodreads/goodreads_db_user
+  goodreads_db_password:
+    file: ${HOME}/.secrets/goodreads/goodreads_db_password
+  goodreads_db_name:
+    file: ${HOME}/.secrets/goodreads/goodreads_db_name
